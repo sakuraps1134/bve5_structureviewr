@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BVE5 Structure Editor - Prototype</title>
+<style>
+:root{color-scheme:dark;--bg:#171a20;--panel:#222832;--panel2:#2b323d;--line:#3d4653;--accent:#e4bd35;--text:#edf0f4;--muted:#aab4c1}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,"Meiryo",sans-serif}
+header{height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:#101318;border-bottom:1px solid var(--line)}
+header strong{font-size:16px}header span{color:var(--muted);font-size:12px}
+main{display:grid;grid-template-columns:260px minmax(320px,1fr) 300px;height:calc(100vh - 52px);min-height:560px}
+aside{padding:12px;background:var(--panel);overflow:auto;border-right:1px solid var(--line)}aside.right{border-right:0;border-left:1px solid var(--line)}
+h2{font-size:13px;margin:3px 0 10px;color:#f1d66b}h3{font-size:12px;color:var(--muted);margin:14px 0 6px}
+button,.filebtn{background:var(--panel2);color:var(--text);border:1px solid var(--line);padding:8px 10px;border-radius:6px;cursor:pointer;font:inherit}
+button:hover,.filebtn:hover{border-color:var(--accent)}button.primary{background:var(--accent);color:#171717;border-color:var(--accent);font-weight:700}
+button:disabled{opacity:.4;cursor:not-allowed}.row{display:flex;gap:6px;align-items:center}.row>*{flex:1}.stack{display:grid;gap:7px}
+input,select,textarea{width:100%;background:#15191f;color:var(--text);border:1px solid var(--line);border-radius:5px;padding:7px;font:inherit}
+label{display:block;color:var(--muted);font-size:12px;margin:8px 0 4px}.hint{font-size:12px;color:var(--muted);line-height:1.5}
+#viewport{position:relative;min-width:0;background:#141a20;overflow:hidden}
+#view{display:block;width:100%;height:100%;touch-action:none}
+.overlay{position:absolute;left:12px;top:12px;display:flex;gap:6px;flex-wrap:wrap;max-width:calc(100% - 24px)}
+.overlay span{background:#10151bd9;border:1px solid #414b59;padding:5px 8px;border-radius:5px;font-size:12px;color:#dbe1e9}
+#modelList,#placementList{display:grid;gap:5px}
+.item{border:1px solid var(--line);background:#191e25;padding:8px;border-radius:5px;cursor:pointer;overflow-wrap:anywhere}
+.item.active{border-color:var(--accent);background:#39331d}.item small{display:block;color:var(--muted);font-size:11px}
+.fieldgrid{display:grid;grid-template-columns:1fr 1fr;gap:4px 8px}
+.fieldgrid label{margin-top:5px}
+#status{padding:8px;background:#171c22;border:1px solid var(--line);border-radius:5px;white-space:pre-wrap;font-size:12px;color:var(--muted);margin-top:10px}
+textarea{min-height:160px;resize:vertical;font-family:Consolas,monospace;font-size:12px}
+input[type=file]{display:none}
+@media(max-width:900px){main{grid-template-columns:220px minmax(260px,1fr);height:auto;min-height:calc(100vh - 52px)}aside.right{grid-column:1/-1;border-left:0;border-top:1px solid var(--line)}#viewport{height:60vh;min-height:400px}}
+@media(max-width:580px){main{display:flex;flex-direction:column}aside{border-right:0;border-bottom:1px solid var(--line)}#viewport{height:55vh;min-height:340px}}
+</style>
+</head>
+<body>
+<header><strong>BVE5 Structure Editor <span> / prototype 0.1</span></strong><span>配置データはブラウザ内で処理されます</span></header>
+<main>
+<aside>
+  <h2>1. ファイル</h2>
+  <div class="stack">
+    <label class="filebtn">マップファイル (.txt / .map) を読み込む<input id="mapFile" type="file" accept=".txt,.map,.csv"></label>
+    <label class="filebtn">ストラクチャーリスト (.csv) を読み込む<input id="listFile" type="file" accept=".csv,.txt"></label>
+    <label class="filebtn">3Dプレビュー用モデル (.glb / .gltf) を追加<input id="modelFile" type="file" accept=".glb,.gltf"></label>
+  </div>
+  <p class="hint">※ BVE5の .x はこの試作版では直接表示できません。Blender等で .glb に変換して読み込んでください。マップファイルは読み込み、距離程候補の抽出とコード出力に利用します。</p>
+  <h3>ストラクチャーキー</h3>
+  <input id="keySearch" placeholder="キーを検索…">
+  <div id="modelList" style="margin-top:7px"></div>
+  <h3>配置を追加</h3>
+  <button id="addBtn" class="primary" style="width:100%">選択キーを配置リストに追加</button>
+  <div id="status">マップファイルを読み込むと距離程候補が表示されます。</div>
+</aside>
+<section id="viewport">
+  <canvas id="view"></canvas>
+  <div class="overlay"><span id="distanceLabel">距離程: 0 m</span><span>ドラッグ: 視点回転 / ホイール: ズーム</span><span>オブジェクト選択後、右側で数値調整</span></div>
+</section>
+<aside class="right">
+  <h2>2. 配置編集</h2>
+  <div id="placementList"></div>
+  <div id="editor" style="display:none">
+    <h3>選択中の配置</h3>
+    <label>ストラクチャーキー</label><input id="pKey">
+    <label>配置先の軌道キー（0 = 自軌道）</label><input id="pTrack" value="0">
+    <div class="fieldgrid">
+      <div><label>X (m)</label><input id="px" type="number" step="0.1"></div>
+      <div><label>Y (m)</label><input id="py" type="number" step="0.1"></div>
+      <div><label>距離程 (m)</label><input id="pz" type="number" step="0.1"></div>
+      <div><label>RX (deg)</label><input id="prx" type="number" step="1" value="0"></div>
+      <div><label>RY (deg)</label><input id="pry" type="number" step="1" value="0"></div>
+      <div><label>RZ (deg)</label><input id="prz" type="number" step="1" value="0"></div>
+      <div><label>tilt (0–3)</label><select id="ptilt"><option>0</option><option>1</option><option>2</option><option>3</option></select></div>
+      <div><label>span (m)</label><input id="pspan" type="number" step="1" value="25"></div>
+    </div>
+    <div class="row" style="margin-top:10px"><button id="deleteBtn">削除</button><button id="duplicateBtn">複製</button></div>
+  </div>
+  <h2 style="margin-top:18px">3. コード出力</h2>
+  <label>出力形式</label>
+  <select id="exportMode"><option value="put">単体配置 Structure.Put</option><option value="repeater">連続配置 Repeater.Begin</option></select>
+  <div id="repeaterFields" style="display:none">
+    <label>連続配置名</label><input id="repName" value="EditorRepeater">
+    <label>間隔 (m)</label><input id="repInterval" type="number" value="25" min="0.1" step="0.1">
+    <label>使用するキー（カンマ区切り）</label><input id="repKeys" placeholder="RailLeft, RailRight">
+  </div>
+  <button id="generateBtn" class="primary" style="width:100%;margin-top:8px">コードを生成</button>
+  <textarea id="output" spellcheck="false" placeholder="生成したBVE5コードがここに表示されます"></textarea>
+  <div class="row" style="margin-top:6px"><button id="copyBtn">コピー</button><button id="downloadBtn">.txtで保存</button></div>
+  <p class="hint">安全のため、元マップファイルを自動上書きしません。出力コードを確認してから、元ファイルの適切な距離程位置へ挿入してください。</p>
+</aside>
+</main>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/controls/OrbitControls.js';
+import { TransformControls } from 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/controls/TransformControls.js';
+import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/loaders/GLTFLoader.js';
+
+const $ = id => document.getElementById(id);
+const canvas=$('view');
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setClearColor(0x263644);
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+const scene=new THREE.Scene(); scene.fog=new THREE.Fog(0x263644,180,900);
+const camera=new THREE.PerspectiveCamera(55,1,0.1,5000); camera.position.set(18,14,28);
+const orbit=new OrbitControls(camera,renderer.domElement); orbit.target.set(0,2,0); orbit.enableDamping=true;
+scene.add(new THREE.HemisphereLight(0xcbdff5,0x45403a,2));
+const sun=new THREE.DirectionalLight(0xffffff,2.2); sun.position.set(15,35,10); scene.add(sun);
+const grid=new THREE.GridHelper(400,80,0x65717c,0x39444e); grid.position.y=-0.02; scene.add(grid);
+const axes=new THREE.AxesHelper(4); scene.add(axes);
+const trackGroup=new THREE.Group(); scene.add(trackGroup);
+const objectGroup=new THREE.Group(); scene.add(objectGroup);
+const loader=new GLTFLoader();
+const transform=new TransformControls(camera,renderer.domElement);
+transform.addEventListener('dragging-changed',e=>orbit.enabled=!e.value);
+transform.addEventListener('objectChange',()=>{if(selected){syncFromObject(selected);renderPlacements();}});
+scene.add(transform.getHelper());
+
+let mapText='',mapName='route.txt',structureKeys=[],selectedKey='',placements=[],selected=null;
+let trackY=0, distanceCandidates=[0], loadedModels=new Map();
+function status(s){$('status').textContent=s}
+function makeTrack(){
+  trackGroup.clear();
+  const railMat=new THREE.MeshStandardMaterial({color:0x9ba4aa,metalness:.65,roughness:.35});
+  const sleeperMat=new THREE.MeshStandardMaterial({color:0x55473b,roughness:.9});
+  const ballastMat=new THREE.MeshStandardMaterial({color:0x555b59,roughness:1});
+  const ballast=new THREE.Mesh(new THREE.BoxGeometry(5,.18,400),ballastMat);ballast.position.y=-.22;trackGroup.add(ballast);
+  for(const x of [-.7175,.7175]){
+    const rail=new THREE.Mesh(new THREE.BoxGeometry(.12,.16,400),railMat);rail.position.set(x,-.08,0);trackGroup.add(rail);
+  }
+  for(let z=-198;z<=200;z+=.65){const s=new THREE.Mesh(new THREE.BoxGeometry(2.5,.12,.22),sleeperMat);s.position.set(0,-.16,z);trackGroup.add(s);}
+  const line=new THREE.GridHelper(400,40,0x66717a,0x343d45);line.position.y=-.1;trackGroup.add(line);
+}
+makeTrack();
+function resize(){const r=$('viewport').getBoundingClientRect();renderer.setSize(r.width,r.height,false);camera.aspect=r.width/r.height;camera.updateProjectionMatrix();}
+window.addEventListener('resize',resize);resize();
+function animate(){requestAnimationFrame(animate);orbit.update();renderer.render(scene,camera)}animate();
+
+function parseCSV(text){
+  // Basic CSV parser supporting quoted fields and commas in quotes.
+  const rows=[];let row=[],field='',q=false;
+  for(let i=0;i<text.length;i++){const c=text[i];if(c==='"'&&q&&text[i+1]==='"'){field+='"';i++}else if(c==='"'){q=!q}else if(c===','&&!q){row.push(field.trim());field=''}else if((c==='\n'||c==='\r')&&!q){if(c==='\r'&&text[i+1]==='\n')i++;row.push(field.trim());if(row.some(v=>v!==''))rows.push(row);row=[];field=''}else field+=c}
+  row.push(field.trim());if(row.some(v=>v!==''))rows.push(row);return rows;
+}
+function parseStructureList(text){
+  const rows=parseCSV(text);const keys=[];
+  for(const row of rows){if(!row.length)continue;const k=(row[0]||'').replace(/^\uFEFF/,'').trim();if(!k||/^;|^#/.test(k)||/^(key|ストラクチャー名|名称)$/i.test(k))continue;keys.push(k)}
+  return [...new Set(keys)];
+}
+function parseDistances(text){
+  const found=new Set([0]);
+  // BVE map distance commands are standalone numeric expressions ending in ';'.
+  // This is intentionally a simple extractor, not a complete BVE map parser.
+  const clean=text.replace(/\/\/.*$/gm,'').replace(/#.*$/gm,'');
+  for(const m of clean.matchAll(/(?:^|[;\n])\s*(-?\d+(?:\.\d+)?)\s*;/gm)){const n=Number(m[1]);if(Number.isFinite(n)&&n>=0)found.add(n)}
+  return [...found].sort((a,b)=>a-b);
+}
+function renderKeys(){
+ const q=$('keySearch').value.toLowerCase();const el=$('modelList');el.innerHTML='';
+ const keys=structureKeys.filter(k=>k.toLowerCase().includes(q));
+ for(const k of keys){const d=document.createElement('div');d.className='item'+(k===selectedKey?' active':'');d.textContent=k;d.onclick=()=>{selectedKey=k;renderKeys()};el.append(d)}
+ if(!keys.length){const d=document.createElement('div');d.className='hint';d.textContent=structureKeys.length?'一致するキーがありません':'ストラクチャーリストを読み込んでください';el.append(d)}
+}
+$('keySearch').addEventListener('input',renderKeys);
+$('mapFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;mapText=await f.text();mapName=f.name;distanceCandidates=parseDistances(mapText);status(`マップ読込: ${mapName}\n距離程候補: ${distanceCandidates.length} 件\n注意: 3D表示はこの試作版では直線軌道の仮表示です。マップの曲線・勾配・カントはまだ再現していません。`)});
+$('listFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;structureKeys=parseStructureList(await f.text());renderKeys();status(`ストラクチャーリスト読込: ${f.name}\nキー数: ${structureKeys.length}\nキーはCSVの1列目から取得しました。`)});
+$('modelFile').addEventListener('change',async e=>{
+ const f=e.target.files[0];if(!f)return;
+ try{
+  const url=URL.createObjectURL(f);const gltf=await loader.loadAsync(url);const model=gltf.scene;
+  const box=new THREE.Box3().setFromObject(model),size=new THREE.Vector3();box.getSize(size);
+  model.position.y-=box.min.y;loadedModels.set(f.name.replace(/\.(glb|gltf)$/i,''),model);
+  // Add model as an optional preview object, centered at origin.
+  const clone=model.clone(true);clone.position.set(0,0,0);objectGroup.add(clone);
+  status(`モデル読込: ${f.name}\n寸法概算: ${size.x.toFixed(2)} × ${size.y.toFixed(2)} × ${size.z.toFixed(2)} m\n注意: glTF内のテクスチャ参照や外部ファイルの扱いはモデルによって異なります。モデルはプレビュー用途です。`);
+  URL.revokeObjectURL(url);
+ }catch(err){status('モデル読込エラー: '+err.message+'\n.glbを試すか、BlenderでglTF 2.0形式に変換してください。')}
+});
+function makePlaceholder(key){
+ const g=new THREE.Group();const mat=new THREE.MeshStandardMaterial({color:0xe2bd36,roughness:.55});
+ const pole=new THREE.Mesh(new THREE.BoxGeometry(.16,3,.16),mat);pole.position.y=1.5;g.add(pole);
+ const head=new THREE.Mesh(new THREE.BoxGeometry(.75,.7,.32),new THREE.MeshStandardMaterial({color:0x353b42}));head.position.set(0,2.8,0);g.add(head);
+ const lamp=new THREE.Mesh(new THREE.SphereGeometry(.17,12,8),new THREE.MeshStandardMaterial({color:0xf04c3e,emissive:0x8b160d}));lamp.position.set(0,2.8,.19);g.add(lamp);
+ g.userData.placeholder=true;g.userData.key=key;return g;
+}
+function addPlacement(key,x=0,y=0,z=0){
+ const obj=makePlaceholder(key);obj.position.set(x,y,z);objectGroup.add(obj);
+ const p={id:crypto.randomUUID(),key,track:'0',x,y,z,rx:0,ry:0,rz:0,tilt:0,span:25,obj};
+ placements.push(p);selectPlacement(p);renderPlacements();return p;
+}
+$('addBtn').onclick=()=>{if(!selectedKey){status('先にストラクチャーキーを選択してください。');return}const z=distanceCandidates.length?distanceCandidates[0]:0;addPlacement(selectedKey,0,0,-z);status(`配置を追加しました: ${selectedKey}\n距離程 ${z} m。3Dプレビューは直線軌道を基準にしています。`)};
+function renderPlacements(){
+ const el=$('placementList');el.innerHTML='';
+ for(const p of placements){const d=document.createElement('div');d.className='item'+(p===selected?' active':'');d.innerHTML=`<b></b><small></small>`;d.querySelector('b').textContent=p.key;d.querySelector('small').textContent=`X ${p.x.toFixed(2)} / Y ${p.y.toFixed(2)} / 距離程 ${p.z.toFixed(2)} m`;d.onclick=()=>selectPlacement(p);el.append(d)}
+}
+function selectPlacement(p){
+ selected=p;$('editor').style.display=p?'block':'none';
+ if(!p){transform.detach();renderPlacements();return}
+ transform.attach(p.obj);fillEditor(p);renderPlacements();
+}
+function fillEditor(p){
+ $('pKey').value=p.key;$('pTrack').value=p.track;
+ for(const [id,v] of Object.entries({px:p.x,py:p.y,pz:-p.z,prx:p.rx,pry:p.ry,prz:p.rz,ptilt:p.tilt,pspan:p.span}))$(id).value=v;
+ $('distanceLabel').textContent=`距離程: ${(-p.z).toFixed(2)} m`;
+}
+function syncFromObject(p){
+ p.x=p.obj.position.x;p.y=p.obj.position.y;p.z=p.obj.position.z;
+ p.rx=THREE.MathUtils.radToDeg(p.obj.rotation.x);p.ry=THREE.MathUtils.radToDeg(p.obj.rotation.y);p.rz=THREE.MathUtils.radToDeg(p.obj.rotation.z);
+ fillEditor(p);
+}
+function applyEditor(){
+ if(!selected)return;
+ selected.key=$('pKey').value.trim()||selected.key;selected.track=$('pTrack').value.trim()||'0';
+ selected.x=Number($('px').value)||0;selected.y=Number($('py').value)||0;selected.z=-(Number($('pz').value)||0);
+ selected.rx=Number($('prx').value)||0;selected.ry=Number($('pry').value)||0;selected.rz=Number($('prz').value)||0;
+ selected.tilt=Number($('ptilt').value)||0;selected.span=Number($('pspan').value)||0;
+ selected.obj.position.set(selected.x,selected.y,selected.z);
+ selected.obj.rotation.set(THREE.MathUtils.degToRad(selected.rx),THREE.MathUtils.degToRad(selected.ry),THREE.MathUtils.degToRad(selected.rz));
+ selected.obj.userData.key=selected.key;$('distanceLabel').textContent=`距離程: ${(-selected.z).toFixed(2)} m`;renderPlacements();
+}
+['pKey','pTrack','px','py','pz','prx','pry','prz','ptilt','pspan'].forEach(id=>$(id).addEventListener('change',applyEditor));
+$('deleteBtn').onclick=()=>{if(!selected)return;objectGroup.remove(selected.obj);placements=placements.filter(p=>p!==selected);selectPlacement(placements[0]||null)};
+$('duplicateBtn').onclick=()=>{if(!selected)return;addPlacement(selected.key,selected.x+1,selected.y,selected.z-2)};
+$('exportMode').onchange=()=>{$('repeaterFields').style.display=$('exportMode').value==='repeater'?'block':'none'};
+function fmt(n){return (Math.round(Number(n)*10000)/10000).toString()}
+function generate(){
+ if(!placements.length){$('output').value='';status('配置がありません。');return}
+ const mode=$('exportMode').value;let out=[];
+ if(mode==='put'){
+  // BVE distance is represented by a standalone distance statement; Put z is offset from current distance.
+  for(const p of placements){
+   const d=Math.max(0,-p.z);
+   out.push(`${fmt(d)};`);
+   out.push(`Structure['${p.key.replace(/'/g,"\\'")}'].Put(${p.track==='0'?'0':`'${p.track.replace(/'/g,"\\'")}'`}, ${fmt(p.x)}, ${fmt(p.y)}, 0, ${fmt(p.rx)}, ${fmt(p.ry)}, ${fmt(p.rz)}, ${p.tilt}, ${fmt(p.span)});`);
+  }
+ }else{
+  const p=selected||placements[0];const keys=$('repKeys').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const rep=$('repName').value.trim()||'EditorRepeater';const interval=Math.max(.1,Number($('repInterval').value)||25);
+  if(!keys.length){$('output').value='連続配置で使用するストラクチャーキーを入力してください。';return}
+  out.push(`${Math.max(0,-p.z)};`);
+  out.push(`Repeater['${rep.replace(/'/g,"\\'")}'].Begin(${p.track==='0'?'0':`'${p.track.replace(/'/g,"\\'")}'`}, ${fmt(p.x)}, ${fmt(p.y)}, 0, ${fmt(p.rx)}, ${fmt(p.ry)}, ${fmt(p.rz)}, ${p.tilt}, ${fmt(p.span)}, ${fmt(interval)}, ${keys.map(k=>`'${k.replace(/'/g,"\\'")}'`).join(', ')});`);
+ }
+ $('output').value=out.join('\n');status('コードを生成しました。\n必ず出力内容を確認してください。距離程の命令位置・相対zの解釈は、実際のマップ構造に合わせて調整が必要です。');
+}
+$('generateBtn').onclick=generate;
+$('copyBtn').onclick=async()=>{try{await navigator.clipboard.writeText($('output').value);status('コードをクリップボードにコピーしました。')}catch{status('コピーできませんでした。出力欄を選択して手動でコピーしてください。')}};
+$('downloadBtn').onclick=()=>{const blob=new Blob([$('output').value],{type:'text/plain;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='bve_structure_output.txt';a.click();URL.revokeObjectURL(a.href)};
+</script>
+</body>
+</html>
